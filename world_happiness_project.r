@@ -6,17 +6,17 @@
 
 # --- PART 0 - ENVIRONMENT SETUP & DEPENDENCY RESOLUTION ---
 # Automatically install and load required libraries to ensure reproducibility
-required_packages <- c("car", "caret", "randomForest", "rpart", "rpart.plot")
+required_packages <- c("car", "randomForest", "rpart", "rpart.plot", "gbm")
 new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
 if (length(new_packages)) {
-  install.packages(new_packages)
+  install.packages(new_packages, repos = "https://cloud.r-project.org")
 }
 
 library(car)
-library(caret)
 library(rpart)
 library(rpart.plot)
 library(randomForest)
+library(gbm)
 
 
 # --- PART 1 - CORE DATA ACQUISITION & INITIAL CLEANING ---
@@ -182,7 +182,7 @@ test_set$gdp_residual    <- test_set$Score - test_set$expected_by_gdp
 
 
 # --- PART 7 - STAGE 2: MODEL TRAINING (EXPLAINING THE HAPPINESS GAP) ---
-# We train all three competitive models on the exact same target variable and predictors.
+# We train all competitive models on the exact same target variable and predictors.
 
 # Define our unified predictive formula
 kultur_formula <- gdp_residual ~ SocialSupport + Health + Freedom + Generosity + 
@@ -194,13 +194,28 @@ model_lm <- lm(kultur_formula, data = train_set)
 
 # 2. Decision Tree (CART) Model
 cat("Training Decision Tree Model...\n")
-model_tree <- rpart(kultur_formula, data = train_set, method = "anova")
+model_tree <- rpart(kultur_formula, data = train_set, method = "anova",
+                    control = rpart.control(minbucket = 5, cp = 0.01))
 
 # 3. Random Forest Model
 cat("Training Random Forest Model...\n")
 set.seed(123)
-model_rf <- randomForest(kultur_formula, data = train_set, ntree = 500, importance = TRUE)
+model_rf <- randomForest(kultur_formula, data = train_set, 
+                         ntree = 500, 
+                         mtry = 3, 
+                         nodesize = 5, 
+                         importance = TRUE)
 
+# 4. Gradient Boosting Model
+cat("Training Gradient Boosting Model...\n")
+set.seed(123)
+model_boost <- gbm(kultur_formula, data = train_set, 
+                   distribution = "gaussian", 
+                   n.trees = 1000, 
+                   interaction.depth = 4, 
+                   shrinkage = 0.001, 
+                   n.minobsinnode = 10,
+                   cv.folds = 10)
 
 # --- PART 8 - DETAILED MODEL EVALUATION & EXPLICIT INTERPRETATION ---
 
@@ -239,9 +254,10 @@ varImpPlot(model_rf, main = "RF Feature Importance: Explaining the Happiness Gap
 # Evaluating model generalizability on completely unseen countries.
 
 # Generate predictions on the test set
-test_pred_lm   <- predict(model_lm, newdata = test_set)
-test_pred_tree <- predict(model_tree, newdata = test_set)
-test_pred_rf   <- predict(model_rf, newdata = test_set)
+test_pred_lm    <- predict(model_lm, newdata = test_set)
+test_pred_tree  <- predict(model_tree, newdata = test_set)
+test_pred_rf    <- predict(model_rf, newdata = test_set)
+test_pred_boost <- predict(model_boost, newdata = test_set, n.trees = 1000) # Boosting requires n.trees for prediction
 
 # Calculate baseline metric values (Unconditioned variance of training residuals)
 mean_train_residual <- mean(train_set$gdp_residual)
@@ -262,11 +278,16 @@ sse_rf  <- sum((test_set$gdp_residual - test_pred_rf)^2)
 r2_rf   <- 1 - (sse_rf / sst_test)
 rmse_rf <- sqrt(mean((test_set$gdp_residual - test_pred_rf)^2))
 
+# --- Metric Calculations for Gradient Boosting ---
+sse_boost  <- sum((test_set$gdp_residual - test_pred_boost)^2)
+r2_boost   <- 1 - (sse_boost / sst_test)
+rmse_boost <- sqrt(mean((test_set$gdp_residual - test_pred_boost)^2))
+
 # Construct a comprehensive comparison table
 evaluation_summary <- data.frame(
-  Model = c("Linear Regression", "Decision Tree (CART)", "Random Forest"),
-  Test_R2 = c(r2_lm, r2_tree, r2_rf),
-  Test_RMSE = c(rmse_lm, rmse_tree, rmse_rf)
+  Model = c("Linear Regression", "Decision Tree (CART)", "Random Forest", "Gradient Boosting (GBM)"),
+  Test_R2 = c(r2_lm, r2_tree, r2_rf, r2_boost),
+  Test_RMSE = c(rmse_lm, rmse_tree, rmse_rf, rmse_boost)
 )
 
 cat("\n==================================================\n")
@@ -274,26 +295,28 @@ cat("OUT-OF-SAMPLE PERFORMANCE ON UNSEEN COUNTRIES\n")
 cat("==================================================\n")
 print(evaluation_summary)
 
-
 # --- PART 10 - METHODOLOGICALLY CLEAN GROUPED 10-FOLD CROSS-VALIDATION ---
 # This manual loop guarantees:
-# 1. No country-leakage (Folds are built on unique countries, not observations).
+# 1. No country-leakage (Folds are built on unique countries using Base R, not caret).
 # 2. Zero residual-leakage (GDP baseline is recalculated for every fold training set).
 
 cat("\nExecuting Leakage-Free Grouped 10-Fold Cross-Validation Loop...\n")
 
 set.seed(123)
 unique_countries_cv <- unique(happiness_clean_master$Country)
-cv_folds <- createFolds(unique_countries_cv, k = 10, list = TRUE)
+shuffled_countries <- sample(unique_countries_cv)
+
+# Manually split unique countries into 10 folds using base R (replaces caret::createFolds)
+cv_folds <- split(shuffled_countries, cut(seq_along(shuffled_countries), breaks = 10, labels = FALSE))
 
 # Initialize vectors to hold R-Squared results for each fold
-cv_r2_vector_lm   <- numeric(10)
-cv_r2_vector_tree <- numeric(10)
-cv_r2_vector_rf   <- numeric(10)
+cv_r2_vector_lm    <- numeric(10)
+cv_r2_vector_tree  <- numeric(10)
+cv_r2_vector_rf    <- numeric(10)
 
 for (fold_idx in 1:10) {
   # Identify testing countries for this specific fold
-  testing_countries <- unique_countries_cv[cv_folds[[fold_idx]]]
+  testing_countries <- cv_folds[[fold_idx]]
   
   # Split the clean master dataset
   fold_train_data <- happiness_clean_master[!happiness_clean_master$Country %in% testing_countries, ]
@@ -306,24 +329,25 @@ for (fold_idx in 1:10) {
   fold_train_data$gdp_residual <- fold_train_data$Score - predict(fold_gdp_baseline, newdata = fold_train_data)
   fold_test_data$gdp_residual  <- fold_test_data$Score - predict(fold_gdp_baseline, newdata = fold_test_data)
   
-  # Step 3: Fit our models using the newly computed residuals
+  # Step 3: Fit our models using the newly computed residuals & proper lecture parameters
   fold_model_lm   <- lm(kultur_formula, data = fold_train_data)
-  fold_model_tree <- rpart(kultur_formula, data = fold_train_data, method = "anova")
-  fold_model_rf   <- randomForest(kultur_formula, data = fold_train_data, ntree = 150)
+  fold_model_tree <- rpart(kultur_formula, data = fold_train_data, method = "anova",
+                           control = rpart.control(minbucket = 5, cp = 0.01))
+  fold_model_rf   <- randomForest(kultur_formula, data = fold_train_data, ntree = 150, mtry = 3, nodesize = 5)
   
   # Step 4: Out-of-sample predictions
-  fold_pred_lm   <- predict(fold_model_lm, newdata = fold_test_data)
-  fold_pred_tree <- predict(fold_model_tree, newdata = fold_test_data)
-  fold_pred_rf   <- predict(fold_model_rf, newdata = fold_test_data)
+  fold_pred_lm    <- predict(fold_model_lm, newdata = fold_test_data)
+  fold_pred_tree  <- predict(fold_model_tree, newdata = fold_test_data)
+  fold_pred_rf    <- predict(fold_model_rf, newdata = fold_test_data)
   
   # Step 5: Evaluate R2 based on training fold variance reference
   fold_train_mean <- mean(fold_train_data$gdp_residual)
   sst_fold_test   <- sum((fold_test_data$gdp_residual - fold_train_mean)^2)
   
   # Save R-Squared for each competitor
-  cv_r2_vector_lm[fold_idx]   <- 1 - (sum((fold_test_data$gdp_residual - fold_pred_lm)^2) / sst_fold_test)
-  cv_r2_vector_tree[fold_idx] <- 1 - (sum((fold_test_data$gdp_residual - fold_pred_tree)^2) / sst_fold_test)
-  cv_r2_vector_rf[fold_idx]   <- 1 - (sum((fold_test_data$gdp_residual - fold_pred_rf)^2) / sst_fold_test)
+  cv_r2_vector_lm[fold_idx]    <- 1 - (sum((fold_test_data$gdp_residual - fold_pred_lm)^2) / sst_fold_test)
+  cv_r2_vector_tree[fold_idx]  <- 1 - (sum((fold_test_data$gdp_residual - fold_pred_tree)^2) / sst_fold_test)
+  cv_r2_vector_rf[fold_idx]    <- 1 - (sum((fold_test_data$gdp_residual - fold_pred_rf)^2) / sst_fold_test)
 }
 
 # Print average Cross-Validation results
