@@ -1,10 +1,16 @@
 # ==========================================
-# WORLD HAPPINESS PROJECT
+# WORLD HAPPINESS PROJECT: CULTURAL EXTENSION
 # Core Question: Why are some countries significantly 
 # happier than their economic situation would predict?
 # ==========================================
 
-# --- PART 1 - LOAD DATA ---
+# --- PART 0 - INSTALL MISSING PACKAGES ---
+# Automatically install required packages if they are not already installed
+required_packages <- c("car", "caret", "randomForest", "rpart", "rpart.plot")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
+if (length(new_packages)) install.packages(new_packages)
+
+# --- PART 1 - LOAD CORE DATA ---
 
 happiness <- read.csv("data/processed/happiness_master.csv")
 
@@ -12,6 +18,7 @@ happiness <- read.csv("data/processed/happiness_master.csv")
 cat("Number of missing values in Corruption before conversion:\n")
 print(sum(is.na(happiness$Corruption) | happiness$Corruption == "N/A" | happiness$Corruption == ""))
 
+# Convert Corruption with a warning check
 happiness$Corruption <- as.numeric(as.character(happiness$Corruption))
 
 str(happiness)
@@ -60,7 +67,7 @@ happiness$Region[happiness$Country %in% c(
 )] <- "SubSaharanAfrica"
 
 
-# --- PART 3 - INITIAL SPLIT ---
+# --- PART 3 - INITIAL SPLIT FOR BASELINE MODEL ---
 
 set.seed(123)
 train_index <- sample(1:nrow(happiness), size = 0.7 * nrow(happiness))
@@ -82,102 +89,9 @@ happiness$expected_by_gdp <- predict(gdp_model, newdata = happiness)
 happiness$gdp_residual <- happiness$Score - happiness$expected_by_gdp
 
 
-# --- PART 4.1 - DEFINE SUBSETS WITH RESIDUALS ---
-# Recreate train and test subsets containing the new residual column
+# --- PART 5 - REGIONAL ANALYSIS & SIGNIFICANCE (ANOVA) ---
 
-train_subset <- happiness[train_index, ]
-test_subset <- happiness[-train_index, ]
-
-cat("\nTraining observations:\n")
-print(nrow(train_subset))
-
-cat("\nTesting observations:\n")
-print(nrow(test_subset))
-
-
-# --- PART 5 - EXPLAINING THE RESIDUALS (MULTIPLE REGRESSION) ---
-# We explain the happiness gap using non-economic variables
-
-explanation_model <- lm(
-  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption + factor(Year),
-  data = train_subset
-)
-
-cat("\n====================\n")
-cat("EXPLAINING ECONOMIC RESIDUALS (REGRESSION)\n")
-cat("====================\n")
-summary(explanation_model)
-
-
-# --- PART 5.1 - MULTICOLLINEARITY (VIF) ---
-
-library(car)
-
-# We check VIF to assess multicollinearity among our explanatory features
-vif_model <- lm(
-  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption,
-  data = train_subset
-)
-
-cat("\n====================\n")
-cat("VARIANCE INFLATION FACTORS\n")
-cat("====================\n")
-print(vif(vif_model))
-
-
-# --- PART 6 - TEST SET PERFORMANCE ---
-
-predictions <- predict(explanation_model, newdata = test_subset)
-
-SSE <- sum((test_subset$gdp_residual - predictions)^2)
-SST <- sum((test_subset$gdp_residual - mean(train_subset$gdp_residual))^2)
-OSR2 <- 1 - SSE / SST
-
-cat("\n====================\n")
-cat("OUT OF SAMPLE R2 (EXPLANATION MODEL)\n")
-cat("====================\n")
-print(OSR2)
-
-
-# --- PART 7 - DETAILED RESIDUAL ANALYSIS ---
-
-cat("\n====================\n")
-cat("HAPPIER THAN ECONOMIC EXPECTATIONS (TOP COUNTRY-YEARS)\n")
-cat("====================\n")
-head(
-  happiness[order(-happiness$gdp_residual), c("Country", "Year", "Score", "expected_by_gdp", "gdp_residual")],
-  15
-)
-
-cat("\n====================\n")
-cat("LESS HAPPY THAN ECONOMIC EXPECTATIONS (BOTTOM COUNTRY-YEARS)\n")
-cat("====================\n")
-head(
-  happiness[order(happiness$gdp_residual), c("Country", "Year", "Score", "expected_by_gdp", "gdp_residual")],
-  15
-)
-
-
-# --- PART 8 - AGGREGATED COUNTRY RESIDUALS ---
-# Calculate average happiness gap per country across all years
-
-country_residuals <- aggregate(gdp_residual ~ Country, data = happiness, mean)
-country_residuals <- country_residuals[order(-country_residuals$gdp_residual), ]
-
-cat("\n====================\n")
-cat("TOP 15 OVERPERFORMING COUNTRIES (ALL-TIME AVERAGE)\n")
-cat("====================\n")
-head(country_residuals, 15)
-
-cat("\n====================\n")
-cat("TOP 15 UNDERPERFORMING COUNTRIES (ALL-TIME AVERAGE)\n")
-cat("====================\n")
-tail(country_residuals, 15)
-
-
-# --- PART 9 - REGIONAL ANALYSIS & SIGNIFICANCE ---
-
-# Descriptive analysis
+# Descriptive analysis of regional performance
 region_results <- aggregate(gdp_residual ~ Region, data = happiness, mean)
 region_results <- region_results[order(-region_results$gdp_residual), ]
 
@@ -195,105 +109,196 @@ cat("====================\n")
 print(anova(anova_model))
 
 
-# --- PART 10 - SAVE RESULTS ---
+# --- PART 6 - HOFSTEDE CULTURAL EXTENSION ---
+# Introduction of external cultural metrics to explain regional gaps
 
-write.csv(happiness, "report/final_happiness_results.csv", row.names = FALSE)
-cat("\nResults saved successfully.\n")
+# 1. Read the raw Hofstede dataset (Semicolon separated)
+hofstede_raw <- read.csv("6-dimensions-for-website-2015-08-16.csv", sep = ";", stringsAsFactors = FALSE)
+
+# 2. Convert #NULL! string expressions to actual R NA values and coerce columns to numeric type
+hofstede_raw$idv <- as.numeric(ifelse(hofstede_raw$idv == "#NULL!", NA, hofstede_raw$idv))
+hofstede_raw$uai <- as.numeric(ifelse(hofstede_raw$uai == "#NULL!", NA, hofstede_raw$uai))
+hofstede_raw$ivr <- as.numeric(ifelse(hofstede_raw$ivr == "#NULL!", NA, hofstede_raw$ivr))
+
+# 3. Keep only targeted cultural indicators and match column naming structure
+# idv = Individualism, uai = Uncertainty Avoidance, ivr = Indulgence
+hofstede_clean <- hofstede_raw[, c("country", "idv", "uai", "ivr")]
+colnames(hofstede_clean) <- c("Country", "Individualism", "UncertaintyAvoidance", "Indulgence")
+
+cat("\n====================\n")
+cat("GLOBAL CULTURAL AVERAGES VS LATIN AMERICA EXAMPLES\n")
+cat("====================\n")
+cat("Global Means:\n")
+print(colMeans(hofstede_clean[, 2:4], na.rm = TRUE))
+cat("\nExample Colombia:\n")
+print(hofstede_clean[hofstede_clean$Country == "Colombia", ])
+cat("\nExample Costa Rica:\n")
+print(hofstede_clean[hofstede_clean$Country == "Costa Rica", ])
+
+# 4. Merge with the base dataset (Inner Join filters out unmatched regional codes automatically)
+happiness_extended <- merge(happiness, hofstede_clean, by = "Country")
+
+cat("\nObservations available for cultural analysis:\n")
+print(dim(happiness_extended))
 
 
-# --- PART 11 - DECISION TREE ---
+# --- PART 7 - SUBSET SPLITTING WITH CULTURAL DATA ---
+
+set.seed(123)
+train_extended_idx <- sample(1:nrow(happiness_extended), size = 0.7 * nrow(happiness_extended))
+train_ext <- happiness_extended[train_extended_idx, ]
+test_ext <- happiness_extended[-train_extended_idx, ]
+
+cat("\nExtended Training observations:\n")
+print(nrow(train_ext))
+cat("Extended Testing observations:\n")
+print(nrow(test_ext))
+
+
+# --- PART 8 - LINEAR REGRESSION EXPLAINING RESIDUALS WITH CULTURE ---
+
+kultur_model <- lm(
+  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption + 
+                 Individualism + Indulgence + UncertaintyAvoidance, 
+  data = train_ext
+)
+
+cat("\n====================\n")
+cat("DOES CULTURE EXPLAIN THE HAPPINESS GAP? (REGRESSION WITH HOFSTEDE)\n")
+cat("====================\n")
+summary(kultur_model)
+
+
+# --- PART 8.1 - MULTICOLLINEARITY TEST (VIF) ---
+
+library(car)
+cat("\n====================\n")
+cat("VARIANCE INFLATION FACTORS (CULTURAL EXTENDED MODEL)\n")
+cat("====================\n")
+# Calculate VIF on the numeric features without factor levels to assess collinearity stability
+print(vif(kultur_model))
+
+
+# --- PART 8.2 - LINEAR MODEL TEST PERFORMANCE ---
+
+predictions_lm <- predict(kultur_model, newdata = test_ext)
+
+SSE_lm <- sum((test_ext$gdp_residual - predictions_lm)^2, na.rm = TRUE)
+SST_lm <- sum((test_ext$gdp_residual - mean(train_ext$gdp_residual, na.rm = TRUE))^2, na.rm = TRUE)
+OSR2_lm <- 1 - SSE_lm / SST_lm
+
+cat("\n====================\n")
+cat("OUT OF SAMPLE R2 (CULTURAL REGRESSION MODEL)\n")
+cat("====================\n")
+print(OSR2_lm)
+
+
+# --- PART 9 - SAVE DETAILED CULTURAL RESULTS ---
+
+write.csv(happiness_extended, "report/final_happiness_cultural_results.csv", row.names = FALSE)
+cat("\nCultural analytical results saved successfully.\n")
+
+
+# --- PART 10 - DECISION TREE WITH CULTURE ---
 
 library(rpart)
 library(rpart.plot)
 
 tree_model <- rpart(
-  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption,
-  data = train_subset,
+  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption + 
+                 Individualism + Indulgence + UncertaintyAvoidance,
+  data = train_ext,
   method = "anova"
 )
 
 cat("\n====================\n")
-cat("DECISION TREE (RESIDUAL ANALYSIS)\n")
+cat("CULTURAL DECISION TREE (RESIDUAL ANALYSIS)\n")
 cat("====================\n")
 print(tree_model)
 
-# Plot Tree
-rpart.plot(tree_model, type = 2, extra = 101)
+# Plot the built tree architecture
+rpart.plot(tree_model, type = 2, extra = 101, main = "Decision Tree with Cultural Dimensions")
 
-# Predict and calculate R2
-tree_predictions <- predict(tree_model, newdata = test_subset)
-tree_SSE <- sum((test_subset$gdp_residual - tree_predictions)^2)
-tree_SST <- sum((test_subset$gdp_residual - mean(train_subset$gdp_residual))^2)
+# Evaluate tree performance via out-of-sample R2
+tree_predictions <- predict(tree_model, newdata = test_ext)
+tree_SSE <- sum((test_ext$gdp_residual - tree_predictions)^2, na.rm = TRUE)
+tree_SST <- sum((test_ext$gdp_residual - mean(train_ext$gdp_residual, na.rm = TRUE))^2, na.rm = TRUE)
 tree_R2 <- 1 - tree_SSE / tree_SST
 
 cat("\n====================\n")
-cat("DECISION TREE R2\n")
+cat("CULTURAL DECISION TREE TEST R2\n")
 cat("====================\n")
 print(tree_R2)
 
 
-# --- PART 12 - RANDOM FOREST COMPARISON ---
-
-# Omit NAs for Random Forest models
-train_rf <- na.omit(train_subset)
-test_rf <- na.omit(test_subset)
+# --- PART 11 - RANDOM FOREST WITH CULTURE ---
 
 library(randomForest)
 
+# Omit missing records across the targeted analytical variables for strict Random Forest compatibility
+forest_vars <- c("gdp_residual", "Score", "GDP", "SocialSupport", "Health", 
+                 "Freedom", "Generosity", "Corruption", "Individualism", 
+                 "Indulgence", "UncertaintyAvoidance")
+
+train_rf_ext <- na.omit(train_ext[, forest_vars])
+test_rf_ext <- na.omit(test_ext[, forest_vars])
+
 set.seed(123)
 
-# FOREST A: Explaining the Happiness Gap (Residuals)
+# FOREST A: Explaining the Happiness Gap (Unerringly targets the residuals via full feature space)
 forest_model_residuals <- randomForest(
-  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption,
-  data = train_rf,
+  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption + 
+                 Individualism + Indulgence + UncertaintyAvoidance,
+  data = train_rf_ext,
   ntree = 500,
   importance = TRUE
 )
 
-# FOREST B: Predicting Original Happiness Score (Full Model with GDP)
+# FOREST B: Predicting Original Happiness Score (Comprehensive reference mapping including economy)
 forest_model_full <- randomForest(
-  Score ~ GDP + SocialSupport + Health + Freedom + Generosity + Corruption,
-  data = train_rf,
+  Score ~ GDP + SocialSupport + Health + Freedom + Generosity + Corruption + 
+          Individualism + Indulgence + UncertaintyAvoidance,
+  data = train_rf_ext,
   ntree = 500,
   importance = TRUE
 )
 
 cat("\n====================\n")
-cat("RANDOM FOREST A (RESIDUALS)\n")
+cat("CULTURAL RANDOM FOREST A (RESIDUALS)\n")
 cat("====================\n")
 print(forest_model_residuals)
 
 cat("\n====================\n")
-cat("RANDOM FOREST B (FULL MODEL WITH GDP)\n")
+cat("CULTURAL RANDOM FOREST B (FULL MODEL WITH GDP)\n")
 cat("====================\n")
 print(forest_model_full)
 
-# Evaluate Forest A (Residuals)
-forest_predictions <- predict(forest_model_residuals, newdata = test_rf)
-forest_SSE <- sum((test_rf$gdp_residual - forest_predictions)^2)
-forest_SST <- sum((test_rf$gdp_residual - mean(train_rf$gdp_residual))^2)
+# Evaluate performance metrics of Forest A on unseen data
+forest_predictions <- predict(forest_model_residuals, newdata = test_rf_ext)
+forest_SSE <- sum((test_rf_ext$gdp_residual - forest_predictions)^2)
+forest_SST <- sum((test_rf_ext$gdp_residual - mean(train_rf_ext$gdp_residual))^2)
 forest_R2 <- 1 - forest_SSE / forest_SST
 
 cat("\n====================\n")
-cat("RANDOM FOREST A (RESIDUALS) R2\n")
+cat("CULTURAL RANDOM FOREST A TEST R2\n")
 cat("====================\n")
 print(forest_R2)
 
-# Compare Variable Importance Plots
+# Comparative diagnostics of structural feature importance
 cat("\n====================\n")
-cat("VARIABLE IMPORTANCE (RESIDUALS VS FULL SCORE)\n")
+cat("VARIABLE IMPORTANCE WITH CULTURAL DIMENSIONS\n")
 cat("====================\n")
 print(importance(forest_model_residuals))
 print(importance(forest_model_full))
 
-# Plots
+# Render relative metric importance outputs graphically
 par(mfrow = c(1, 2))
-varImpPlot(forest_model_residuals, main = "RF: Explaining the Happiness Gap")
-varImpPlot(forest_model_full, main = "RF: Predicting Original Score")
+varImpPlot(forest_model_residuals, main = "RF: Culture & Happiness Gap")
+varImpPlot(forest_model_full, main = "RF: Full Score Prediction")
 par(mfrow = c(1, 1))
 
 
-# --- PART 13 - K-FOLD CROSS-VALIDATION ---
+# --- PART 12 - K-FOLD CROSS-VALIDATION WITH CULTURE ---
 
 library(caret)
 
@@ -301,39 +306,30 @@ cv_control <- trainControl(method = "cv", number = 10)
 
 set.seed(123)
 
-# 1. Cross-validate Linear Regression (Residuals)
+# 1. Cross-validate Linear Regression Model with Cultural Metrics
 cv_lm <- train(
-  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption, 
-  data = train_rf, 
-  method = "lm", 
-  trControl = cv_control
+  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption + 
+                 Individualism + Indulgence + UncertaintyAvoidance, 
+  data = train_rf_ext, method = "lm", trControl = cv_control
 )
 
-# 2. Cross-validate CART Model (Residuals)
+# 2. Cross-validate CART Model with Cultural Metrics
 cv_cart <- train(
-  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption, 
-  data = train_rf, 
-  method = "rpart", 
-  trControl = cv_control
+  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption + 
+                 Individualism + Indulgence + UncertaintyAvoidance, 
+  data = train_rf_ext, method = "rpart", trControl = cv_control
 )
 
-# 3. Cross-validate Random Forest Model (Residuals)
+# 3. Cross-validate Random Forest Model with Cultural Metrics
 cv_rf <- train(
-  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption, 
-  data = train_rf, 
-  method = "rf", 
-  trControl = cv_control
+  gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption + 
+                 Individualism + Indulgence + UncertaintyAvoidance, 
+  data = train_rf_ext, method = "rf", trControl = cv_control
 )
 
 cat("\n====================\n")
-cat("CROSS VALIDATION R-SQUARED COMPARISON\n")
+cat("CROSS VALIDATION R-SQUARED COMPARISON (WITH CULTURE)\n")
 cat("====================\n")
-
-cat("\nLinear Regression CV R-Squared:\n")
-print(mean(cv_lm$results$Rsquared))
-
-cat("\nCART (Decision Tree) CV R-Squared:\n")
-print(mean(cv_cart$results$Rsquared))
-
-cat("\nRandom Forest CV R-Squared:\n")
-print(mean(cv_rf$results$Rsquared))
+cat("Linear Regression CV R-Squared: ", mean(cv_lm$results$Rsquared, na.rm = TRUE), "\n")
+cat("CART (Decision Tree) CV R-Squared: ", mean(cv_cart$results$Rsquared, na.rm = TRUE), "\n")
+cat("Random Forest CV R-Squared: ", mean(cv_rf$results$Rsquared, na.rm = TRUE), "\n")
