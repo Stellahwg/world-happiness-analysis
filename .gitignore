@@ -1,0 +1,23 @@
+# Old working scripts
+00_load_all_years.r
+01_data_understanding.r
+02_exploratory_analysis.r
+03_regression_model.r
+04_extended_regression.r
+05_results_summary.r
+
+# Unused datasets
+EVS_WVS_Joint_Csv_v5_0.csv
+
+# Archives
+archive/
+archive.zip
+
+# Auto-generated
+Rplots.pdf
+.DS_Store
+
+# R environment
+R/
+.Rhistory
+.RData

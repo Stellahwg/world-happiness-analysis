@@ -145,27 +145,6 @@ gdp_vis_model <- lm(Score ~ GDP, data = happiness_clean_master)
 happiness_clean_master$vis_residual <- happiness_clean_master$Score -
   predict(gdp_vis_model, newdata = happiness_clean_master)
 
-# Individualism vs Happiness Gap
-ggplot(happiness_clean_master, aes(x = Individualism, y = vis_residual)) +
-  geom_point(alpha = 0.4) +
-  geom_smooth(method = "lm", se = TRUE, color = "darkorange") +
-  labs(
-    title = "Individualism vs Happiness Gap",
-    x = "Hofstede Individualism",
-    y = "Happiness Gap (residual after GDP)"
-  ) +
-  theme_minimal()
-
-# Indulgence vs Happiness Gap
-ggplot(happiness_clean_master, aes(x = Indulgence, y = vis_residual)) +
-  geom_point(alpha = 0.4) +
-  geom_smooth(method = "lm", se = TRUE, color = "forestgreen") +
-  labs(
-    title = "Indulgence vs Happiness Gap",
-    x = "Hofstede Indulgence",
-    y = "Happiness Gap (residual after GDP)"
-  ) +
-  theme_minimal()
 
 
 # --- PART 6 - Stage 1: GDP baseline model (on merged dataset) ---
@@ -229,10 +208,6 @@ cat("A) LINEAR REGRESSION RESULTS\n")
 cat("==================================================\n")
 print(summary(model_lm))
 
-# Residual diagnostic plots (checking model assumptions)
-par(mfrow = c(2, 2))
-plot(model_lm, main = "Linear Model Diagnostics")
-par(mfrow = c(1, 1))
 
 # Check for multicollinearity using VIF
 cat("\nVIF for Linear Model:\n")
@@ -242,7 +217,6 @@ cat("\n==================================================\n")
 cat("B) DECISION TREE\n")
 cat("==================================================\n")
 print(model_tree)
-rpart.plot(model_tree, type = 2, extra = 101, main = "Cultural Decision Tree")
 
 cat("\n==================================================\n")
 cat("C) RANDOM FOREST\n")
@@ -426,8 +400,8 @@ cat("FULL VARIABLE IMPORTANCE RANKING (including GDP)\n")
 cat("Predicting Happiness Score directly\n")
 cat("==================================================\n")
 print(round(imp_all_sorted, 2))
-cat("\n-> The top 3 variables are all cultural (Hofstede).\n")
-cat("   GDP ranks only 5th despite being the dominant economic predictor.\n")
+top3 <- rownames(imp_all_sorted)[1:3]
+cat("\n-> Top 3 variables:", paste(top3, collapse = ", "), "\n")
 
 
 # --- PART 13 - Save results ---
