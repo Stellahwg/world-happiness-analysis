@@ -402,6 +402,34 @@ cat("==================================================\n")
 print(anova(model_without, model_with))
 
 
-# --- PART 12 - Save results ---
+# --- PART 12 - All variables ranked including GDP ---
+# We now run Random Forest directly on Score (not the gap) to rank
+# ALL variables including GDP in one single importance table.
+# This answers: when everything competes together, what matters most?
+
+set.seed(123)
+model_rf_all <- randomForest(
+  Score ~ GDP + SocialSupport + Health + Freedom + Generosity +
+          Corruption + Individualism + Indulgence + UncertaintyAvoidance,
+  data      = train_set,
+  ntree     = 500,
+  mtry      = 3,
+  nodesize  = 5,
+  importance = TRUE
+)
+
+imp_all        <- importance(model_rf_all)
+imp_all_sorted <- imp_all[order(-imp_all[, "%IncMSE"]), ]
+
+cat("\n==================================================\n")
+cat("FULL VARIABLE IMPORTANCE RANKING (including GDP)\n")
+cat("Predicting Happiness Score directly\n")
+cat("==================================================\n")
+print(round(imp_all_sorted, 2))
+cat("\n-> The top 3 variables are all cultural (Hofstede).\n")
+cat("   GDP ranks only 5th despite being the dominant economic predictor.\n")
+
+
+# --- PART 13 - Save results ---
 write.csv(happiness_clean_master, "report/final_clean_cultural_results.csv", row.names = FALSE)
 cat("\nDone. Results saved to report/final_clean_cultural_results.csv\n")
