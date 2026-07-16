@@ -16,6 +16,8 @@ archive.zip
 # Auto-generated
 Rplots.pdf
 .DS_Store
+PRESENTATION_GUIDE.md
+report/
 
 # R environment
 R/
