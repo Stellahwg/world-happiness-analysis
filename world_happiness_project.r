@@ -359,20 +359,37 @@ cat("Average Decision Tree (CART) CV R2: ", mean(cv_r2_vector_tree), "\n")
 cat("Average Random Forest CV R2:      ", mean(cv_r2_vector_rf), "\n")
 
 
-# --- PART 11 - ROBUSTNESS CHECK: DIRECT MODEL SPECIFICATION ---
-# As recommended in academic methodology, we test a single-stage model 
-# to ensure our cultural effects are not an artifact of the residual design.
+# --- PART 11 - ROBUSTNESS CHECK & HIERARCHICAL REGRESSION ---
+# As recommended in academic methodology, we test if adding Hofstede's 
+# cultural dimensions significantly improves our explanation of happiness.
 
-direct_formula <- Score ~ GDP + SocialSupport + Health + Freedom + Generosity + 
-                          Corruption + Individualism + Indulgence + UncertaintyAvoidance
-
-direct_regression_model <- lm(direct_formula, data = train_set)
+# 1. Model WITHOUT Hofstede cultural data (Only World Happiness Report variables)
+formula_without_kultur <- Score ~ GDP + SocialSupport + Health + Freedom + Generosity + Corruption
+model_without_kultur   <- lm(formula_without_kultur, data = train_set)
 
 cat("\n==================================================\n")
-cat("ROBUSTNESS CHECK: DIRECT SINGLE-STAGE REGRESSION\n")
+cat("ROBUSTNESS CHECK: MODEL WITHOUT HOFSTEDE DATA\n")
 cat("==================================================\n")
-print(summary(direct_regression_model))
+print(summary(model_without_kultur))
 
+
+# 2. Model WITH Hofstede cultural data (Your original direct model)
+formula_with_kultur <- Score ~ GDP + SocialSupport + Health + Freedom + Generosity + 
+                               Corruption + Individualism + Indulgence + UncertaintyAvoidance
+model_with_kultur   <- lm(formula_with_kultur, data = train_set)
+
+cat("\n==================================================\n")
+cat("ROBUSTNESS CHECK: MODEL WITH HOFSTEDE DATA (DIRECT)\n")
+cat("==================================================\n")
+print(summary(model_with_kultur))
+
+
+# 3. Hierarchical Model Comparison (F-Test / ANOVA)
+# This test mathematically proves whether adding Hofstede data is justified!
+cat("\n==================================================\n")
+cat("STATISTICAL JUSTIFICATION: ANOVA MODEL COMPARISON\n")
+cat("==================================================\n")
+print(anova(model_without_kultur, model_with_kultur))
 
 # --- PART 12 - EXPORT ARCHIVING ---
 # Save the final cleaned and integrated dataset for group distribution
