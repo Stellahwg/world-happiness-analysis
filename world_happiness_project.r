@@ -100,7 +100,71 @@ cat("   This reduces the dataset to 62 countries with available Hofstede data.\n
 cat("   We accept this as a trade-off between sample size and explanatory depth.\n")
 
 
-# --- PART 3 - Load merged dataset (WHR + Hofstede) ---
+# --- PART 3 - Benchmark: 4 models on 164 countries, WHR variables only (no Hofstede) ---
+# Before introducing Hofstede (which cuts us to 62 countries), we first run the same
+# 4 models on the full 164-country dataset using only WHR variables.
+# This gives us a fair benchmark: how much does sample size alone buy us?
+
+cat("\n==================================================\n")
+cat("PART 3: BENCHMARK - 164 COUNTRIES, WHR ONLY (no Hofstede)\n")
+cat("==================================================\n")
+
+# Compute GDP residuals on the full train/test split
+train_full$gdp_residual <- train_full$Score - predict(gdp_only_model, newdata = train_full)
+test_full$gdp_residual  <- test_full$Score  - predict(gdp_only_model, newdata = test_full)
+
+gap_formula_whr <- gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption
+
+# 1. Linear Regression
+model_lm_whr <- lm(gap_formula_whr, data = train_full)
+
+# 2. Decision Tree
+model_tree_whr <- rpart(gap_formula_whr, data = train_full, method = "anova",
+                        control = rpart.control(minbucket = 10, cp = 0.01))
+
+# 3. Random Forest
+set.seed(123)
+model_rf_whr <- randomForest(gap_formula_whr, data = train_full,
+                             ntree = 500, mtry = 2, nodesize = 5, importance = TRUE)
+
+# 4. Gradient Boosting
+set.seed(123)
+model_boost_whr <- gbm(gap_formula_whr, data = train_full,
+                       distribution = "gaussian",
+                       n.trees = 1000, interaction.depth = 4,
+                       shrinkage = 0.001, n.minobsinnode = 10)
+
+# Out-of-sample performance
+pred_lm_whr    <- predict(model_lm_whr,    newdata = test_full)
+pred_tree_whr  <- predict(model_tree_whr,  newdata = test_full)
+pred_rf_whr    <- predict(model_rf_whr,    newdata = test_full)
+pred_boost_whr <- predict(model_boost_whr, newdata = test_full, n.trees = 1000)
+
+mean_train_whr <- mean(train_full$gdp_residual)
+sst_whr        <- sum((test_full$gdp_residual - mean_train_whr)^2)
+
+evaluation_whr <- data.frame(
+  Model   = c("Linear Regression", "Decision Tree", "Random Forest", "Gradient Boosting"),
+  Test_R2 = round(c(
+    1 - sum((test_full$gdp_residual - pred_lm_whr)^2)    / sst_whr,
+    1 - sum((test_full$gdp_residual - pred_tree_whr)^2)  / sst_whr,
+    1 - sum((test_full$gdp_residual - pred_rf_whr)^2)    / sst_whr,
+    1 - sum((test_full$gdp_residual - pred_boost_whr)^2) / sst_whr
+  ), 3),
+  RMSE = round(c(
+    sqrt(mean((test_full$gdp_residual - pred_lm_whr)^2)),
+    sqrt(mean((test_full$gdp_residual - pred_tree_whr)^2)),
+    sqrt(mean((test_full$gdp_residual - pred_rf_whr)^2)),
+    sqrt(mean((test_full$gdp_residual - pred_boost_whr)^2))
+  ), 3)
+)
+
+cat("\nResults (164 countries, WHR variables only):\n")
+print(evaluation_whr)
+cat("\n-> These results will be compared to the Hofstede models (62 countries) at the end.\n")
+
+
+# --- PART 5 - Load merged dataset (WHR + Hofstede) ---
 # Merging with Hofstede reduces coverage from 164 to 62 countries.
 # We acknowledge this as a limitation but argue it is necessary
 # to properly test our cultural hypothesis.
@@ -123,7 +187,7 @@ cat("(Reduced from 164 to", length(unique(happiness_clean_master$Country)),
     "countries after Hofstede merge)\n")
 
 
-# --- PART 4 - Train/Test Split on merged dataset ---
+# --- PART 6 - Train/Test Split on merged dataset ---
 # Split by country to avoid the same country appearing in both train and test.
 
 set.seed(123)
@@ -138,7 +202,7 @@ cat("Training:", length(unique(train_set$Country)), "countries,", nrow(train_set
 cat("Testing: ", length(unique(test_set$Country)), "countries,", nrow(test_set), "rows\n")
 
 
-# --- PART 5 - Exploratory plots on merged dataset ---
+# --- PART 7 - Exploratory plots on merged dataset ---
 
 # Compute GDP residuals for visualisation
 gdp_vis_model <- lm(Score ~ GDP, data = happiness_clean_master)
@@ -147,7 +211,7 @@ happiness_clean_master$vis_residual <- happiness_clean_master$Score -
 
 
 
-# --- PART 6 - Stage 1: GDP baseline model (on merged dataset) ---
+# --- PART 8 - Stage 1: GDP baseline model (on merged dataset) ---
 # Re-estimate the GDP baseline strictly on the training set.
 
 gdp_baseline_model <- lm(Score ~ GDP, data = train_set)
@@ -165,7 +229,7 @@ test_set$expected_by_gdp <- predict(gdp_baseline_model, newdata = test_set)
 test_set$gdp_residual    <- test_set$Score - test_set$expected_by_gdp
 
 
-# --- PART 7 - Stage 2: Train models to explain the Happiness Gap ---
+# --- PART 9 - Stage 2: Train models to explain the Happiness Gap ---
 
 # Formula includes both WHR social variables and Hofstede cultural dimensions
 gap_formula <- gdp_residual ~ SocialSupport + Health + Freedom + Generosity +
@@ -201,7 +265,7 @@ model_boost <- gbm(gap_formula, data = train_set,
                    n.minobsinnode = 10)
 
 
-# --- PART 8 - Model outputs and interpretation ---
+# --- PART 10 - Model outputs and interpretation ---
 
 cat("\n==================================================\n")
 cat("A) LINEAR REGRESSION RESULTS\n")
@@ -228,7 +292,7 @@ print(importance(model_rf))
 varImpPlot(model_rf, main = "Random Forest Variable Importance")
 
 
-# --- PART 9 - Out-of-sample test performance ---
+# --- PART 11 - Out-of-sample test performance ---
 
 test_pred_lm    <- predict(model_lm, newdata = test_set)
 test_pred_tree  <- predict(model_tree, newdata = test_set)
@@ -275,7 +339,7 @@ print(evaluation_summary)
 # The cross-validation results below give a more reliable picture.
 
 
-# --- PART 10 - 10-fold cross-validation ---
+# --- PART 12 - 10-fold cross-validation ---
 # Country-grouped folds, GDP baseline re-estimated inside each fold.
 
 cat("\nRunning 10-fold cross-validation...\n")
@@ -345,7 +409,7 @@ cat("Gradient Boosting:  ", mean(cv_r2_boost), "\n")
 # This is a known limitation of working with 62 countries.
 
 
-# --- PART 11 - Does Hofstede actually help? (ANOVA / F-test) ---
+# --- PART 13 - Does Hofstede actually help? (ANOVA / F-test) ---
 # Compare a model without Hofstede against one with Hofstede variables.
 # Both models predict Score directly (not the residual) so the F-test
 # measures whether Hofstede adds explanatory power on top of all WHR variables.
@@ -376,7 +440,7 @@ cat("==================================================\n")
 print(anova(model_without, model_with))
 
 
-# --- PART 12 - All variables ranked including GDP ---
+# --- PART 14 - All variables ranked including GDP ---
 # We now run Random Forest directly on Score (not the gap) to rank
 # ALL variables including GDP in one single importance table.
 # This answers: when everything competes together, what matters most?
@@ -404,6 +468,57 @@ top3 <- rownames(imp_all_sorted)[1:3]
 cat("\n-> Top 3 variables:", paste(top3, collapse = ", "), "\n")
 
 
-# --- PART 13 - Save results ---
+# --- PART 15 - Final comparison: 164 countries (WHR only) vs 62 countries (WHR + Hofstede) ---
+# Three-way comparison to cleanly separate two effects:
+#   Column 1 -> 2: what does losing 102 countries cost us?
+#   Column 2 -> 3: what do the Hofstede variables actually add?
+
+cat("\n==================================================\n")
+cat("PART 15: BENCHMARK - 62 COUNTRIES, WHR ONLY (no Hofstede)\n")
+cat("==================================================\n")
+
+gap_formula_whr_62 <- gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption
+
+model_lm_whr62    <- lm(gap_formula_whr_62, data = train_set)
+model_tree_whr62  <- rpart(gap_formula_whr_62, data = train_set, method = "anova",
+                           control = rpart.control(minbucket = 10, cp = 0.01))
+set.seed(123)
+model_rf_whr62    <- randomForest(gap_formula_whr_62, data = train_set,
+                                  ntree = 500, mtry = 2, nodesize = 5)
+set.seed(123)
+model_boost_whr62 <- gbm(gap_formula_whr_62, data = train_set,
+                         distribution = "gaussian",
+                         n.trees = 1000, interaction.depth = 4,
+                         shrinkage = 0.001, n.minobsinnode = 10)
+
+pred_lm_whr62    <- predict(model_lm_whr62,    newdata = test_set)
+pred_tree_whr62  <- predict(model_tree_whr62,  newdata = test_set)
+pred_rf_whr62    <- predict(model_rf_whr62,    newdata = test_set)
+pred_boost_whr62 <- predict(model_boost_whr62, newdata = test_set, n.trees = 1000)
+
+evaluation_whr62 <- data.frame(
+  Model   = c("Linear Regression", "Decision Tree", "Random Forest", "Gradient Boosting"),
+  Test_R2 = round(c(
+    1 - sum((test_set$gdp_residual - pred_lm_whr62)^2)    / sst_test,
+    1 - sum((test_set$gdp_residual - pred_tree_whr62)^2)  / sst_test,
+    1 - sum((test_set$gdp_residual - pred_rf_whr62)^2)    / sst_test,
+    1 - sum((test_set$gdp_residual - pred_boost_whr62)^2) / sst_test
+  ), 3)
+)
+
+cat("\n==================================================\n")
+cat("FINAL THREE-WAY COMPARISON\n")
+cat("==================================================\n")
+cat("\nColumn 1: 164 countries, WHR only\n")
+print(evaluation_whr[, c("Model", "Test_R2")])
+cat("\nColumn 2: 62 countries, WHR only\n")
+print(evaluation_whr62)
+cat("\nColumn 3: 62 countries, WHR + Hofstede\n")
+print(evaluation_summary[, c("Model", "Test_R2")])
+cat("\n-> Column 1 vs 2: effect of smaller sample size\n")
+cat("   Column 2 vs 3: effect of adding Hofstede variables\n")
+
+
+# --- PART 16 - Save results ---
 write.csv(happiness_clean_master, "report/final_clean_cultural_results.csv", row.names = FALSE)
 cat("\nDone. Results saved to report/final_clean_cultural_results.csv\n")
