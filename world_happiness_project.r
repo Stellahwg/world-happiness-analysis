@@ -414,8 +414,9 @@ cat("Gradient Boosting:  ", mean(cv_r2_boost), "\n")
 # Both models predict Score directly (not the residual) so the F-test
 # measures whether Hofstede adds explanatory power on top of all WHR variables.
 # Note: Health shows a negative coefficient due to multicollinearity with
-# SocialSupport (r = 0.51). This is expected and confirmed by the VIF check
-# in Part 8. The ANOVA result is not affected by this.
+# SocialSupport (r = 0.51). Both variables tend to be high in wealthy countries,
+# creating a shared GDP-driven signal. The VIF check in Part 10 confirms this
+# is within acceptable bounds. The ANOVA result is not affected by this.
 
 formula_without <- Score ~ GDP + SocialSupport + Health + Freedom + Generosity + Corruption
 model_without   <- lm(formula_without, data = train_set)
@@ -474,7 +475,7 @@ cat("\n-> Top 3 variables:", paste(top3, collapse = ", "), "\n")
 #   Column 2 -> 3: what do the Hofstede variables actually add?
 
 cat("\n==================================================\n")
-cat("PART 15: BENCHMARK - 62 COUNTRIES, WHR ONLY (no Hofstede)\n")
+cat("PART 16: BENCHMARK - 62 COUNTRIES, WHR ONLY (no Hofstede)\n")
 cat("==================================================\n")
 
 gap_formula_whr_62 <- gdp_residual ~ SocialSupport + Health + Freedom + Generosity + Corruption
